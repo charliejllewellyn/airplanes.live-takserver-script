@@ -1,4 +1,5 @@
 # This was a ATAK community script developed by https://github.com/niccellular
+# Shout out WildFire and SLAB
 import requests
 import xml.etree.ElementTree as ET
 import argparse

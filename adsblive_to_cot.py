@@ -8,6 +8,7 @@ import datetime
 import uuid
 import time
 import ssl
+import boto3
 
 
 def json_to_cot(json_data, stale_secs):
@@ -129,9 +130,9 @@ if __name__ == "__main__":
                         help="Centerpoint Latitude")
     parser.add_argument("-lon", type=float, required=True,
                         help="Centerpoint Longitude")
-    parser.add_argument('--dest', required=True,
+    parser.add_argument('--dest', required=False,
                         help='Destination Hostname or IP Address for Sending CoT')
-    parser.add_argument('--port', required=True, type=int,
+    parser.add_argument('--port', required=False, type=int,
                         help='Destination Port')
     parser.add_argument('--radius', required=False, type=int, default=25,
                         help='Radius in Nautical Miles')
@@ -144,6 +145,8 @@ if __name__ == "__main__":
                         help='Send packets via TCP')
     group.add_argument('--cert', required=False,
                        help='Path to unencrypted User SSL Certificate')
+    group.add_argument('--sns', required=False,
+                       help='SNS Topic ARN to publish COT messages')
     args = parser.parse_args()
 
     url = "https://api.airplanes.live/v2/point/" + str(args.lat) + "/" + str(args.lon) + "/" + str(args.radius)
@@ -153,16 +156,22 @@ if __name__ == "__main__":
     else:
         stale_period = args.rate * 2.5
 
-    if args.udp:
-        s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
-    elif args.tcp:
-        s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s.connect((args.dest, args.port))
+    if args.sns:
+        sns_client = boto3.client('sns')
+        s = None
     else:
-        # Cert
-        sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        s = ssl.wrap_socket(sock, certfile=args.cert)
-        s.connect((args.dest, args.port))
+        if not args.dest or not args.port:
+            parser.error("--dest and --port are required when not using --sns")
+        if args.udp:
+            s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+        elif args.tcp:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.connect((args.dest, args.port))
+        else:
+            # Cert
+            sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s = ssl.wrap_socket(sock, certfile=args.cert)
+            s.connect((args.dest, args.port))
 
     while True:
         json_data = fetch_json(url)
@@ -172,7 +181,9 @@ if __name__ == "__main__":
                 if not cot_xml:
                     continue
                 # print(cot_xml)
-                if args.udp:
+                if args.sns:
+                    sns_client.publish(TopicArn=args.sns, Message=cot_xml)
+                elif args.udp:
                     s.sendto(bytes(cot_xml, "utf-8"), (args.dest, args.port))
                 else:
                     s.sendall(bytes(cot_xml, "utf-8"))
